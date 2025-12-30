@@ -3,21 +3,21 @@ import pandas as pd
 import numpy as np
 
 # Configurare pagină
-st.set_page_config(page_title="Loto Analyzer Pro", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Loto Analyzer Pro - Top 500", page_icon="📊", layout="wide")
 
-# Stiluri CSS - Corectate pentru vizibilitate maximă
+# Stiluri CSS
 st.markdown("""
     <style>
     .stProgress > div > div > div > div { background-color: #4CAF50; }
-    /* Scris negru pe galben deschis pentru anomalii - mult mai vizibil */
     .anomaly-card { 
         border: 2px solid #ff4b4b; 
-        padding: 15px; 
-        border-radius: 10px; 
+        padding: 10px; 
+        border-radius: 8px; 
         background-color: #fff3cd; 
         color: #000000; 
-        margin-bottom: 15px; 
+        margin-bottom: 10px; 
         font-weight: bold;
+        font-size: 12px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -30,21 +30,17 @@ def detecteaza_anomalia(numere):
     if not numere: return []
     numere_s = sorted(numere)
     alerte = []
-    # 1. Consecutivitate
     cons = sum(1 for i in range(len(numere_s)-1) if numere_s[i+1] - numere_s[i] == 1)
-    if cons >= 2: alerte.append(f"Consecutive: {cons+1}")
-    # 2. Suma (Raportată la media ta de 31/număr)
+    if cons >= 2: alerte.append(f"Consecutive")
     suma = sum(numere)
-    if suma < 60 or suma > 200: alerte.append(f"Suma: {suma}")
-    # 3. Paritate
+    if suma < 60 or suma > 200: alerte.append(f"Suma")
     pare = sum(1 for n in numere if n % 2 == 0)
-    if pare == len(numere) or pare == 0: alerte.append("Paritate 4/0")
-    # 4. Terminații
+    if pare == len(numere) or pare == 0: alerte.append("Paritate")
     ultimele = set(n % 10 for n in numere)
-    if len(ultimele) == 1: alerte.append("Terminatie identica")
+    if len(ultimele) == 1: alerte.append("Terminatie")
     return alerte
 
-# --- SIDEBAR: GESTIONARE DATE ȘI DOWNLOAD ---
+# --- SIDEBAR: DATE ȘI DOWNLOAD TOP 500 ---
 with st.sidebar:
     st.header("📥 Import Date")
     r_input = st.text_area("Introdu Runde", height=100)
@@ -69,78 +65,73 @@ with st.sidebar:
     if st.button("Resetare Totală", use_container_width=True):
         st.session_state.runde = []; st.session_state.variante = []; st.rerun()
 
-    # --- LOGICA DOWNLOAD FILTRATĂ ---
+    # --- LOGICA DOWNLOAD TOP 500 ---
     if st.session_state.runde and st.session_state.variante:
         st.divider()
-        st.header("💾 Export Curat")
+        st.header("💾 Export Top 500")
         
         v_ids = [v['id'] for v in st.session_state.variante]
         v_nums = [v['numere'] for v in st.session_state.variante]
         r_sets = [set(r) for r in st.session_state.runde]
         v_sets = [set(v) for v in v_nums]
-        matrice = np.array([[len(vs.intersection(rs)) for rs in r_sets] for vs in v_sets])
+        matrice = np.array([[len(vs.intersection(rs)) for rs in r_sets] for v_sets])
         
-        linii_export = []
+        # Clasament: Calculăm un scor de performanță (3p pentru 4/4, 2p pentru 3/4, 1p pentru 2/4)
+        scoruri = np.sum(matrice == 2, axis=1) * 1 + np.sum(matrice == 3, axis=1) * 5 + np.sum(matrice == 4, axis=1) * 20
+        
+        date_export = []
         for i in range(len(v_ids)):
-            # 1. Verificăm dacă e Anomalie
-            este_anomalie = len(detecteaza_anomalia(v_nums[i])) > 0
-            
-            # 2. Verificăm performanța
-            max_h = np.max(matrice[i])
-            c2 = np.sum(matrice[i] == 2)
-            is_buna_sau_medie = (max_h >= 3) or (c2 > (len(r_sets) * 0.15))
-            
-            # Exportăm DOAR dacă are scor și NU este anomalie
-            if is_buna_sau_medie and not este_anomalie:
-                nums_str = " ".join(map(str, v_nums[i]))
-                linii_export.append(f"{v_ids[i]}, {nums_str}")
+            # Sărim peste anomalii
+            if len(detecteaza_anomalia(v_nums[i])) == 0:
+                date_export.append({
+                    'id': v_ids[i],
+                    'numere': " ".join(map(str, v_nums[i])),
+                    'scor': scoruri[i]
+                })
         
-        if linii_export:
+        # Sortează după scor (descrescător) și ia primele 500
+        df_export = pd.DataFrame(date_export).sort_values(by='scor', ascending=False).head(500)
+        
+        if not df_export.empty:
+            linii_txt = [f"{row['id']}, {row['numere']}" for _, row in df_export.iterrows()]
             st.download_button(
-                label="📥 Descarcă Bune & Fără Anomalii",
-                data="\n".join(linii_export),
-                file_name="selectie_finala.txt",
+                label=f"📥 Descarcă Top {len(linii_txt)} Variante",
+                data="\n".join(linii_txt),
+                file_name="top_500_curate.txt",
                 mime="text/plain",
                 use_container_width=True
             )
-            st.success(f"Filtrate: {len(linii_export)} variante curate.")
-        else:
-            st.warning("Nicio variantă nu a trecut filtrul de siguranță.")
+            st.caption(f"S-au ales cele mai bune {len(linii_txt)} variante non-anormale.")
 
-# --- AFIȘARE PRINCIPALĂ ---
+# --- AFIȘARE ---
 if st.session_state.runde and st.session_state.variante:
-    st.subheader("🚨 Detector Anomalii (Vizibilitate sporită)")
-    anom_cols = st.columns(4)
+    st.subheader("🚨 Anomalii Detectate")
+    anom_cols = st.columns(5)
     anom_count = 0
     for i, (vid, vnum) in enumerate(zip([v['id'] for v in st.session_state.variante], [v['numere'] for v in st.session_state.variante])):
         alerte = detecteaza_anomalia(vnum)
         if alerte:
-            with anom_cols[anom_count % 4]:
-                st.markdown(f"""<div class='anomaly-card'>
-                    ID: {vid}<br>
-                    <span style='font-size: 13px;'>{', '.join(alerte)}</span>
-                </div>""", unsafe_allow_html=True)
+            with anom_cols[anom_count % 5]:
+                st.markdown(f"<div class='anomaly-card'>ID: {vid}<br>{', '.join(alerte)}</div>", unsafe_allow_html=True)
                 anom_count += 1
     
     st.divider()
-    st.subheader("📊 Monitorizare Performanță")
+    st.subheader("📊 Top Performanță (Vizualizare)")
     
+    # Afișăm în interfață sortat după cele mai slabe (cum ai cerut anterior pentru monitorizare)
     c0_counts = np.sum(matrice == 0, axis=1)
     sort_idx = np.argsort(-c0_counts)
     
     grid = st.columns(3)
-    for idx, i in enumerate(sort_idx):
+    for idx, i in enumerate(sort_idx[:100]): # Limităm afișarea la 100 carduri ca să nu blocheze browserul
         res = matrice[i]
         c = {j: np.sum(res == j) for j in range(5)}
         max_val = np.max(res)
         
-        # Culori carduri performanță
-        if max_val >= 3: color, status = "#28a745", "BUNĂ"
-        elif c[2] > (len(r_sets) * 0.15): color, status = "#ffc107", "MEDIE"
-        else: color, status = "#dc3545", "SLABĂ"
+        color = "#28a745" if max_val >= 3 else "#ffc107" if c[2] > (len(r_sets)*0.1) else "#dc3545"
         
         with grid[idx % 3]:
             with st.container(border=True):
-                st.markdown(f"**ID: {v_ids[i]}** | <span style='color:{color}'>{status}</span>", unsafe_allow_html=True)
+                st.markdown(f"**ID: {v_ids[i]}**")
                 st.progress((c[2] + c[3] + c[4]) / len(r_sets))
                 st.caption(f"Record: {max_val}/4 | 0/4: {c[0]} ori")
