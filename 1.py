@@ -3,20 +3,33 @@ import pandas as pd
 import numpy as np
 
 # Configurare pagină
-st.set_page_config(page_title="Monitorizare Avansată Loterie", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Monitorizare Avansată & Anomalii", page_icon="📊", layout="wide")
 
-st.title("📊 Monitorizare Detaliată Variante")
+st.title("📊 Monitorizare Detaliată & Detecție Anomalii")
 st.divider()
 
 if 'runde' not in st.session_state: st.session_state.runde = []
 if 'variante' not in st.session_state: st.session_state.variante = []
 
-# --- INPUT DATE ---
-with st.sidebar:
-    st.header("⚙️ Configurare Date")
+# --- FUNCȚIE INGINEREASCĂ: DETECȚIE ANOMALII ---
+def analizeaza_anomalia(numere):
+    if not numere: return None
+    numere_sortate = sorted(numere)
+    # Diferența dintre cel mai mare și cel mai mic (Dispersia)
+    dispersie = numere_sortate[-1] - numere_sortate[0]
+    # Verificare numere consecutive (ex: 1, 2, 3)
+    consecutive = sum(1 for i in range(len(numere_sortate)-1) if numere_sortate[i+1] - numere_sortate[i] == 1)
     
-    # Input Runde
-    text_r = st.text_area("Runde (ex: 1,2,3,4)", height=150, key="side_r")
+    alerte = []
+    if consecutive >= 2: alerte.append(f"⚠️ {consecutive+1} numere consecutive")
+    if dispersie < 10: alerte.append("⚠️ Dispersie prea mică (grupate)")
+    
+    return alerte
+
+# --- SIDEBAR PENTRU DATE ---
+with st.sidebar:
+    st.header("⚙️ Configurare")
+    text_r = st.text_area("Runde (1,2,3,4)", height=150, key="side_r")
     if st.button("Adaugă Runde", use_container_width=True, type="primary"):
         for l in text_r.strip().split('\n'):
             try:
@@ -25,72 +38,78 @@ with st.sidebar:
             except: pass
         st.rerun()
         
-    # Input Variante
-    text_v = st.text_area("Variante (ex: ID1, 1 2 3 4)", height=150, key="side_v")
+    text_v = st.text_area("Variante (ID1, 1 2 3 4)", height=150, key="side_v")
     if st.button("Adaugă Variante", use_container_width=True, type="primary"):
         for l in text_v.strip().split('\n'):
             try:
                 p = l.split(',', 1)
                 if len(p) == 2:
-                    st.session_state.variante.append({'id': p[0].strip(), 'numere': [int(x.strip()) for x in p[1].strip().split()]})
+                    st.session_state.variante.append({
+                        'id': p[0].strip(), 
+                        'numere': [int(x.strip()) for x in p[1].strip().split()]
+                    })
             except: pass
         st.rerun()
     
-    if st.button("Șterge tot", use_container_width=True):
-        st.session_state.runde = []
-        st.session_state.variante = []
-        st.rerun()
+    if st.button("Resetare Totală", use_container_width=True):
+        st.session_state.runde = []; st.session_state.variante = []; st.rerun()
 
-# --- CALCUL ȘI AFIȘARE INEDITĂ ---
+# --- ANALIZĂ ȘI AFIȘARE ---
 if st.session_state.runde and st.session_state.variante:
-    # Vectorizare pentru performanță
     v_ids = [v['id'] for v in st.session_state.variante]
-    v_sets = [set(v['numere']) for v in st.session_state.variante]
+    v_nums = [v['numere'] for v in st.session_state.variante]
+    v_sets = [set(v) for v in v_nums]
     r_sets = [set(r) for r in st.session_state.runde]
     
     matrice = np.array([[len(vs.intersection(rs)) for rs in r_sets] for vs in v_sets])
     nr_runde = len(st.session_state.runde)
 
-    st.subheader(f"Analiză pe {len(v_ids)} variante și {nr_runde} runde")
+    # SECȚIUNEA 1: DETECTORUL DE ANOMALII (Top-ul paginii)
+    st.subheader("🚨 Anomalii Detectate (Variante cu șanse minime)")
+    anomalii_cols = st.columns(4)
+    found_anomaly = False
     
-    # Grid de afișare (3 variante pe rând)
+    for i, (v_id, nums) in enumerate(zip(v_ids, v_nums)):
+        alerte = analizeaza_anomalia(nums)
+        if alerte:
+            found_anomaly = True
+            with anomalii_cols[i % 4]:
+                st.error(f"**ID: {v_id}**\n\n{', '.join(alerte)}\n\nNumere: `{nums}`")
+    
+    if not found_anomaly:
+        st.success("Nu s-au detectat anomalii structurale în variantele introduse.")
+
+    st.divider()
+
+    # SECȚIUNEA 2: MONITORIZARE DETALIATĂ
+    st.subheader("📊 Monitorizare Performanță & Progres")
     cols = st.columns(3)
     
     for i, v_id in enumerate(v_ids):
         res = matrice[i]
-        c0, c1, c2, c3, c4 = [np.sum(res == j) for j in range(5)]
-        
-        # Determinăm culoarea și statusul
+        stats = {j: np.sum(res == j) for j in range(5)}
         max_h = np.max(res)
+        
+        # Logica de culori
         if max_h >= 3:
-            color = "#28a745" # Verde
-            status = "BUNĂ (Top)"
-        elif c2 > (nr_runde * 0.2): # Dacă are peste 20% rezultate de 2/4
-            color = "#ffc107" # Galben
-            status = "MEDIE (Potențial)"
+            color, status = "#28a745", "BUNĂ (Top)"
+        elif stats[2] > (nr_runde * 0.15):
+            color, status = "#ffc107", "MEDIE (Potențial)"
         else:
-            color = "#dc3545" # Roșu
-            status = "SLABĂ (Rece)"
+            color, status = "#dc3545", "SLABĂ (Rece)"
             
-        # Calculăm progresul (cât de des a ieșit minim 2/4)
-        progres = (c2 + c3 + c4) / nr_runde if nr_runde > 0 else 0
+        progres = (stats[2] + stats[3] + stats[4]) / nr_runde if nr_runde > 0 else 0
         
         with cols[i % 3]:
             with st.container(border=True):
-                st.markdown(f"### ID: {v_id}")
-                st.markdown(f"**Status:** <span style='color:{color}'>{status}</span>", unsafe_allow_html=True)
-                
-                # Bară de progres pentru "Calitatea" variantei
+                st.markdown(f"### ID: {v_id} <span style='font-size:12px; color:{color}'>[{status}]</span>", unsafe_allow_html=True)
                 st.progress(progres)
-                st.caption(f"Frecvență succes (minim 2/4): {progres*100:.1f}%")
                 
-                # Detalii distribuție
-                stat_cols = st.columns(4)
-                stat_cols[0].metric("1/4", c1)
-                stat_cols[1].metric("2/4", c2)
-                stat_cols[2].metric("3/4", c3)
-                stat_cols[3].metric("4/4", c4)
-                
-                st.write(f"❌ **Total 0/4:** {c0} ori")
+                m_cols = st.columns(4)
+                m_cols[0].metric("1/4", stats[1])
+                m_cols[1].metric("2/4", stats[2])
+                m_cols[2].metric("3/4", stats[3])
+                m_cols[3].metric("4/4", stats[4])
+                st.caption(f"Eșec total (0/4): {stats[0]} ori")
 else:
-    st.info("Folosește meniul din stânga pentru a introduce datele.")
+    st.info("Introdu datele în meniul lateral pentru a porni monitorizarea.")
