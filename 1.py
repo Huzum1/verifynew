@@ -3,10 +3,13 @@ import pandas as pd
 import numpy as np
 
 # Configurare pagină
-st.set_page_config(page_title="Analiză Loterie - Scor", page_icon="🎰", layout="wide")
+st.set_page_config(page_title="Analiză Loterie - Variante Reci", page_icon="🎰", layout="wide")
 
-st.title("🎰 Clasament Performanță Variante")
-st.caption("Analiză bazată pe scorul acumulat în toate rundele")
+st.title("🎰 Analiză Variante: Calde vs Reci")
+st.markdown("""
+    **Logica de selecție:** * **Variante Calde:** Cele care ating pragul de **3/4** sau **4/4** (potențial ridicat).
+    * **Variante Reci (Slabe):** Cele care rămân blocate în **0/4, 1/4** sau **2/4** (fără progres).
+""")
 st.divider()
 
 if 'runde' not in st.session_state: st.session_state.runde = []
@@ -15,8 +18,8 @@ if 'variante' not in st.session_state: st.session_state.variante = []
 # --- ZONA INPUT ---
 col1, col2 = st.columns(2)
 with col1:
-    st.header("📋 Runde")
-    text_runde = st.text_area("Format: 1,6,7,9", height=150, key="in_r")
+    st.header("📋 Panou Runde")
+    text_runde = st.text_area("Introdu rundele (ex: 1,2,3,4)", height=150, key="in_r")
     c1, c2 = st.columns(2)
     if c1.button("Adaugă Runde", type="primary", use_container_width=True):
         if text_runde.strip():
@@ -26,12 +29,12 @@ with col1:
                     if n: st.session_state.runde.append(n)
                 except: pass
             st.rerun()
-    if c2.button("Șterge", use_container_width=True, key="del_r"):
+    if c2.button("Șterge tot", use_container_width=True):
         st.session_state.runde = []; st.rerun()
 
 with col2:
-    st.header("🎲 Variante")
-    text_variante = st.text_area("Format: ID, 1 2 3 4", height=150, key="in_v")
+    st.header("🎲 Panou Variante")
+    text_variante = st.text_area("Introdu variantele (ex: ID, 1 2 3 4)", height=150, key="in_v")
     c3, c4 = st.columns(2)
     if c3.button("Adaugă Variante", type="primary", use_container_width=True):
         if text_variante.strip():
@@ -42,52 +45,63 @@ with col2:
                         st.session_state.variante.append({'id': p[0].strip(), 'numere': [int(x.strip()) for x in p[1].strip().split()]})
                 except: pass
             st.rerun()
-    if c4.button("Șterge", use_container_width=True, key="del_v"):
+    if c4.button("Șterge tot", use_container_width=True):
         st.session_state.variante = []; st.rerun()
 
-# --- ANALIZĂ ȘI CLASAMENT ---
+# --- CALCUL ȘI FILTRARE ---
 if st.session_state.runde and st.session_state.variante:
     st.divider()
     
-    # 1. Calcul rapid (Vectorizat)
-    var_sets = [set(v['numere']) for v in st.session_state.variante]
-    run_sets = [set(r) for r in st.session_state.runde]
-    ids = [v['id'] for v in st.session_state.variante]
+    # Vectorizare pentru viteză (Numpy)
+    v_sets = [set(v['numere']) for v in st.session_state.variante]
+    r_sets = [set(r) for r in st.session_state.runde]
+    v_ids = [v['id'] for v in st.session_state.variante]
     
-    # Matricea de potriviri
-    matrice = np.array([[len(v_s.intersection(r_s)) for r_s in run_sets] for v_s in var_sets])
+    # Matricea de bază: calculăm instant toate intersecțiile
+    matrice = np.array([[len(vs.intersection(rs)) for rs in r_sets] for vs in v_sets])
     
-    # 2. Calculăm SCORUL MEDIU per variantă (Suma punctelor / Număr runde)
-    # Acesta este cel mai corect indicator de "slăbiciune" sau "putere"
-    scoruri_medii = np.mean(matrice, axis=1)
-    
-    # Creăm un DataFrame pentru sortare ușoară
-    df_rezultate = pd.DataFrame({
-        'ID': ids,
-        'Scor Mediu': scoruri_medii,
-        'Maxim': np.max(matrice, axis=1)
-    }).sort_values(by='Scor Mediu', ascending=False)
+    # Statistici per variantă
+    max_hits = np.max(matrice, axis=1)
+    count_0 = np.sum(matrice == 0, axis=1)
+    count_1 = np.sum(matrice == 1, axis=1)
+    count_2 = np.sum(matrice == 2, axis=1)
+    count_3 = np.sum(matrice == 3, axis=1)
+    count_4 = np.sum(matrice == 4, axis=1)
 
-    # 3. Afișare în coloane
-    col_bune, col_slabe = st.columns(2)
+    col_A, col_B = st.columns(2)
 
-    with col_bune:
-        st.subheader("🟢 Top Variante Puternice")
+    with col_A:
+        st.subheader("🟢 Variante cu Potențial (Calde)")
+        st.caption("Au atins cel puțin o dată 3/4 sau 4/4")
         with st.container(height=500):
-            top_bune = df_rezultate.head(50) # Primele 50 cele mai bune
-            for _, row in top_bune.iterrows():
-                st.write(f"✅ **ID {row['ID']}** | Scor Mediu: `{row['Scor Mediu']:.2f}` | Record: `{row['Maxim']}/4`")
+            # Filtrăm variantele care au măcar un 3 sau un 4
+            idx_calde = np.where(max_hits >= 3)[0]
+            for i in idx_calde:
+                st.success(f"ID {v_ids[i]} | Record: {max_hits[i]}/4 | (3/4: {count_3[i]} ori, 4/4: {count_4[i]} ori)")
 
-    with col_slabe:
-        st.subheader("🔴 Top Variante Slabe")
+    with col_B:
+        st.subheader("🔴 Variante Slabe (Reci)")
+        st.caption("Blocate sub pragul de 3/4 în toate rundele")
         with st.container(height=500):
-            # Sortăm invers pentru cele mai slabe
-            top_slabe = df_rezultate.sort_values(by='Scor Mediu', ascending=True).head(50)
-            for _, row in top_slabe.iterrows():
-                st.markdown(f"<span style='color: #ff4b4b;'>❌ **ID {row['ID']}**</span> | Scor Mediu: `{row['Scor Mediu']:.2f}` | Record: `{row['Maxim']}/4`", unsafe_allow_html=True)
+            # Filtrăm variantele care NU au trecut niciodată de 2/4
+            idx_reci = np.where(max_hits < 3)[0]
+            # Sortăm: cele mai slabe sunt cele cu cele mai multe rezultate de 0/4
+            sorted_reci = idx_reci[np.argsort(-count_0[idx_reci])] 
+            
+            for i in sorted_reci:
+                st.markdown(f"""
+                <div style="border: 1px solid #ff4b4b; padding: 10px; border-radius: 5px; margin-bottom: 5px;">
+                    <b style="color: #ff4b4b;">ID {v_ids[i]}</b><br>
+                    <small>Record: {max_hits[i]}/4 | 0/4: <b>{count_0[i]}</b> ori | 1/4: {count_1[i]} ori | 2/4: {count_2[i]} ori</small>
+                </div>
+                """, unsafe_allow_html=True)
 
-    # Statistici finale
+    # Statistici rapide
     st.divider()
-    st.metric("Total Variante Analizate", len(ids))
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Variante", len(v_ids))
+    m2.metric("Variante Calde", len(idx_calde))
+    m3.metric("Variante Reci", len(idx_reci))
+
 else:
-    st.info("Introdu datele pentru a genera clasamentul de performanță.")
+    st.info("Aștept introducerea datelor pentru analiză...")
