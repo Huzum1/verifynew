@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 # Configurare pagină
-st.set_page_config(page_title="Loto Big Data Analyzer", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Loto Big Data - Top 250", page_icon="📊", layout="wide")
 
 st.markdown("""
     <style>
@@ -30,16 +30,18 @@ def detecteaza_anomalia(numere):
     if len(ultimele) == 1: alerte.append("Terminatie")
     return alerte
 
-# --- SIDEBAR: IMPORT ȘI EXPORT ---
+# --- SIDEBAR: IMPORT, RESET ȘI DOWNLOAD ---
 with st.sidebar:
-    st.header("📥 Import Big Data")
+    st.header("📥 Gestiune Date")
+    
+    # Import Runde
     r_input = st.text_area("Introdu Runde (până la 13.000)", height=150)
     if st.button("Procesează Runde", type="primary", use_container_width=True):
-        # Procesare eficientă a liniilor
         lines = r_input.strip().split('\n')
         st.session_state.runde = [[int(x) for x in l.replace(',', ' ').split()] for l in lines if l.strip()]
         st.rerun()
 
+    # Import Variante
     v_input = st.text_area("Introdu Variante (ID, 1 2 3 4)", height=150)
     if st.button("Procesează Variante", type="primary", use_container_width=True):
         lines = v_input.strip().split('\n')
@@ -53,25 +55,34 @@ with st.sidebar:
     
     st.divider()
     
-    # --- LOGICA DOWNLOAD TOP 500 ---
+    # BUTON RESETARE (Restaurat)
+    if st.button("🗑️ Resetare Totală", use_container_width=True):
+        st.session_state.runde = []
+        st.session_state.variante = []
+        st.rerun()
+
+    st.divider()
+    
+    # --- LOGICA DOWNLOAD TOP 250 ---
     if st.session_state.runde and st.session_state.variante:
-        # Vectorizare NumPy
+        st.header("💾 Export Top 250")
+        
         v_ids = [v['id'] for v in st.session_state.variante]
         v_nums = [v['numere'] for v in st.session_state.variante]
         r_sets = [set(r) for r in st.session_state.runde]
         v_sets = [set(v) for v in v_nums]
         
-        # Corecție Sintaxă aici:
+        # Calcul intersecții NumPy
         matrice = np.array([[len(vs.intersection(rs)) for rs in r_sets] for vs in v_sets])
         
-        # Calcul Scor Ponderat (Prio pe 3/4 și 4/4)
+        # Scor ponderat pentru clasament
         scoruri = (np.sum(matrice == 2, axis=1) * 1 + 
                    np.sum(matrice == 3, axis=1) * 8 + 
                    np.sum(matrice == 4, axis=1) * 50)
         
         export_data = []
         for i in range(len(v_ids)):
-            # EXCLUDEM ANOMALIILE DIN DOWNLOAD
+            # Filtru: Excludem anomaliile
             if not detecteaza_anomalia(v_nums[i]):
                 export_data.append({
                     'id': v_ids[i],
@@ -79,18 +90,20 @@ with st.sidebar:
                     'scor': scoruri[i]
                 })
         
-        df_export = pd.DataFrame(export_data).sort_values(by='scor', ascending=False).head(500)
+        # Sortează și păstrează TOP 250
+        df_export = pd.DataFrame(export_data).sort_values(by='scor', ascending=False).head(250)
         
         if not df_export.empty:
             txt_output = "\n".join([f"{row['id']}, {row['numere']}" for _, row in df_export.iterrows()])
-            st.download_button("📥 Descarcă TOP 500 (Curate)", txt_output, "top_500.txt", use_container_width=True)
+            st.download_button(f"📥 Descarcă Top {len(df_export)} Variante", txt_output, "top_250_curate.txt", use_container_width=True)
+            st.success(f"Gata! Top {len(df_export)} selectate.")
 
 # --- AFIȘARE REZULTATE ---
 if st.session_state.runde and st.session_state.variante:
-    st.info(f"Analiză finalizată: {len(st.session_state.runde)} runde procesate.")
+    st.info(f"Sistemul a analizat {len(st.session_state.runde)} runde și {len(st.session_state.variante)} variante.")
     
-    # Afișare Anomalii
-    with st.expander("🚨 Vezi Variantele cu Anomalii Structurale"):
+    # Vizualizare Anomalii
+    with st.expander("🚨 Detectate ca Anomalii (Excluse din Top)"):
         cols = st.columns(5)
         a_idx = 0
         for v in st.session_state.variante:
@@ -101,10 +114,9 @@ if st.session_state.runde and st.session_state.variante:
                 a_idx += 1
 
     st.divider()
-    st.subheader("📊 Vizualizare Eșantion Performanță (Primele 30)")
-    # Afișăm doar 30 carduri pentru a nu îngreuna pagina la 13.000 runde
+    st.subheader("📊 Exemplu Performanță (Primele 30 sortate după eșec)")
+    
     grid = st.columns(3)
-    # Sortăm după cele mai "slabe" (c0) pentru vizualizare așa cum ai vrut inițial
     c0_counts = np.sum(matrice == 0, axis=1)
     view_idx = np.argsort(-c0_counts)[:30]
     
@@ -114,7 +126,7 @@ if st.session_state.runde and st.session_state.variante:
         with grid[idx % 3]:
             with st.container(border=True):
                 st.write(f"**ID: {v_ids[i]}**")
-                st.caption(f"0/4: {c[0]} | 2/4: {c[2]} | 3/4: {c[3]} | 4/4: {c[4]}")
-                st.progress((c[2]+c[3]+c[4])/len(r_sets))
+                st.caption(f"2/4: {c[2]} | 3/4: {c[3]} | 4/4: {c[4]}")
+                st.progress((c[2]+c[3]+c[4])/len(st.session_state.runde))
 else:
-    st.warning("Introdu datele în sidebar pentru a începe.")
+    st.warning("Te rog să încarci datele din meniul lateral.")
